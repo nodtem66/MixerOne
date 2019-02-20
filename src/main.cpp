@@ -2,8 +2,6 @@
 
 void gpio_init(void) {
     turn_off_motor();
-    systick_attach_callback(os_tick);
-    os_on_assert_attach_callback(on_assert);
     
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(REV_MOTOR_PIN, PWM);
@@ -16,36 +14,31 @@ void gpio_init(void) {
     
     UART.begin(9600);
     
-    lcd.init();
-    lcd.backlight();
+    //lcd.init();
+    //lcd.backlight();
 
     ASSERT( EEPROM.init() == EEPROM_OK );
     load_EEPROM();
 }
 
-void status_led_task(void) {
-    task_open();
+static void status_led_task(void* args) {
     for (;;) {
         digitalWrite(LED_BUILTIN, LOW);
-        //turn_on_motor(10000, 10000);
-        task_wait(1000);
+        vTaskDelay(configTICK_RATE_HZ);
         digitalWrite(LED_BUILTIN, HIGH);
-        //turn_off_motor();
-        task_wait(1000);
+        vTaskDelay(configTICK_RATE_HZ);
     }
-    task_close();
 }
 
 void display_home_task(void) {
-    static Evt_t evt;
-    task_open();
+    
     for (;;) {
         state = STATE_HOME;
         lcd_display_home();
-        
+        /*
         do {
-            event_wait_multiple(0, home_event, next_button_pressed_event, prev_button_pressed_event);
-            evt = event_last_signaled_get();
+            //event_wait_multiple(0, home_event, next_button_pressed_event, prev_button_pressed_event);
+            //evt = event_last_signaled_get();
         } while (evt != home_event && state != STATE_HOME);
         
         if (evt == next_button_pressed_event) {
@@ -68,11 +61,11 @@ void display_home_task(void) {
                 
             }
             task_wait(3000);
-        }
+        }*/
     }
-    task_close();
 }
 
+/*
 void serial_command_task(void) {
     static byte b;
     static uint8_t success = 0;
@@ -165,9 +158,7 @@ void session_display_task(void) {
 void session_running_task(void) {
     static uint16_t minute = 0;
     static int8_t second = 0;
-    task_open();
     for (;;) {
-        event_wait(session_running_event);
         session_running = true;
         state = STATE_RUNNING;
         for (session_page = 0;session_page < session_length; session_page++) {
@@ -180,7 +171,6 @@ void session_running_task(void) {
             for (; minute >=0; minute--) {
                 for (second = 60; second >= 0;) {
                     show_timer(minute, second);
-                    event_wait_timeout(next_button_pressed_event, 1000);
                     // WHEN PAUSE
                     if (event_last_signaled_get() == next_button_pressed_event) {
                         session_running = false;
@@ -210,31 +200,16 @@ void session_running_task(void) {
         }
 finish:
         session_running = false;
-        event_signal(session_display_event);
     }
-    task_close();
-}
+}*/
 
 /*=== START Main CODE =================================*/
 int main(void) {
     gpio_init();
-    os_init();
-
-    next_button_pressed_event = event_create();
-    prev_button_pressed_event = event_create();
-    home_event = event_create();
-    test_pwm_event = event_create();
-    session_display_event = event_create();
-    session_running_event = event_create();
-
-    task_create(serial_command_task, 0, 1, NULL, 0, 0);
-    //task_create(session_running_task, 0, 2, NULL, 0, 0);
-    task_create(test_pwm_task, 0, 3, NULL, 0, 0);
-    //task_create(session_display_task, 0, 4, NULL, 0, 0);
-    task_create(display_home_task, 0, 5, NULL, 0, 0);
-    task_create(status_led_task, 0, 100, NULL, 0, 0);
-    
-    os_start();
+    portBASE_TYPE s1;
+    s1 = xTaskCreate(status_led_task, "LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+    MY_ASSERT(s1 == pdPASS);
+    vTaskStartScheduler();
     return 0;
 }
 /*=== END Main CODE ===================================*/

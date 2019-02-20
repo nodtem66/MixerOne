@@ -5,7 +5,7 @@
 #include <Arduino.h>
 #include <WString.h>
 #include <LiquidCrystal_I2C.h>
-#include <cocoos.h>
+#include <MapleFreeRTOS900.h>
 
 #ifdef PRODUCTION
 #define UART Serial1
@@ -18,6 +18,7 @@
 #define PARSE_CMD_MOTOR1    0
 #define PARSE_CMD_MOTOR2    1
 #define PARSE_CMD_DURATION  2
+#define MY_ASSERT(x) if ((x) == 0) on_assert(__FILE__, __LINE__, #x)
 
 #define NEXT_BUTTON_PIN PA1
 #define PREV_BUTTON_PIN PA0
@@ -40,12 +41,6 @@ String serial_rx = "";
 bool session_running = false;
 uint8_t session_page = 0;
 uint32_t pressed_event_millis = 0;
-Evt_t test_pwm_event;
-Evt_t next_button_pressed_event;
-Evt_t prev_button_pressed_event;
-Evt_t session_display_event;
-Evt_t session_running_event;
-Evt_t home_event;
 
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
@@ -69,10 +64,10 @@ void on_assert(const char* filename, uint16_t line, const char* expr) {
 void on_push_button(void) {
     if (millis() - pressed_event_millis > BUTTON_PRESSED_EVENT_DELAY_MILLIS) {
         if (digitalRead(NEXT_BUTTON_PIN) == LOW) {
-            event_ISR_signal(next_button_pressed_event);
+            //event_ISR_signal(next_button_pressed_event);
         }
         if (digitalRead(PREV_BUTTON_PIN) == LOW) {
-            event_ISR_signal(prev_button_pressed_event);
+            //event_ISR_signal(prev_button_pressed_event);
         }
     }
     pressed_event_millis = millis();
