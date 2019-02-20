@@ -1,12 +1,14 @@
 #include "main.h"
 
 void gpio_init(void) {
+    turn_off_motor();
     systick_attach_callback(os_tick);
     os_on_assert_attach_callback(on_assert);
     
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(REV_MOTOR_PIN, PWM);
     pinMode(ROT_MOTOR_PIN, PWM);
+    Timer3.setPrescaleFactor(22);
     pinMode(NEXT_BUTTON_PIN, INPUT_PULLUP);
     pinMode(PREV_BUTTON_PIN, INPUT_PULLUP);
     attachInterrupt(NEXT_BUTTON_PIN, on_push_button, FALLING);
@@ -25,8 +27,10 @@ void status_led_task(void) {
     task_open();
     for (;;) {
         digitalWrite(LED_BUILTIN, LOW);
+        //turn_on_motor(10000, 10000);
         task_wait(1000);
         digitalWrite(LED_BUILTIN, HIGH);
+        //turn_off_motor();
         task_wait(1000);
     }
     task_close();
@@ -169,8 +173,8 @@ void session_running_task(void) {
         for (session_page = 0;session_page < session_length; session_page++) {
             lcd_display_running(session_page);
             turn_on_motor(
-                session_list[session_page].motor1_pwm,
-                session_list[session_page].motor2_pwm
+                PWM_PERCENT_TO_SPEED(session_list[session_page].motor1_pwm),
+                PWM_PERCENT_TO_SPEED(session_list[session_page].motor2_pwm)
             );
             minute = session_list[session_page].duration_minute - 1;
             for (; minute >=0; minute--) {
@@ -195,8 +199,8 @@ void session_running_task(void) {
                             lcd.setCursor(13, 3);
                             lcd.print("Pause >");
                             turn_on_motor(
-                                session_list[session_page].motor1_pwm,
-                                session_list[session_page].motor2_pwm
+                                PWM_PERCENT_TO_SPEED(session_list[session_page].motor1_pwm),
+                                PWM_PERCENT_TO_SPEED(session_list[session_page].motor2_pwm)
                             );
                         }
                     }
@@ -224,9 +228,9 @@ int main(void) {
     session_running_event = event_create();
 
     task_create(serial_command_task, 0, 1, NULL, 0, 0);
-    task_create(session_running_task, 0, 2, NULL, 0, 0);
+    //task_create(session_running_task, 0, 2, NULL, 0, 0);
     task_create(test_pwm_task, 0, 3, NULL, 0, 0);
-    task_create(session_display_task, 0, 4, NULL, 0, 0);
+    //task_create(session_display_task, 0, 4, NULL, 0, 0);
     task_create(display_home_task, 0, 5, NULL, 0, 0);
     task_create(status_led_task, 0, 100, NULL, 0, 0);
     

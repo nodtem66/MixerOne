@@ -25,6 +25,7 @@
 #define ROT_MOTOR_PIN PB1
 
 #define BUTTON_PRESSED_EVENT_DELAY_MILLIS 300
+#define PWM_PERCENT_TO_SPEED(x) ((x) * 65535 / 100.0)
 
 #define IS_DIGIT(x) ((x) >= '0' && (x) <= '9')
 #define IS_LAST_INDEX(x,y) ((x) == ((y) - 1))
@@ -51,8 +52,7 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 #include "EEPROM_helper.h"
 
 void on_assert(const char* filename, uint16_t line, const char* expr) {
-    
-    while(!UART);
+
     while(1) {
         UART.print("Assert: ");
         UART.print(expr);
