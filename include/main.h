@@ -1,7 +1,16 @@
 #ifndef __MAIN__H_
 #define __MAIN__H_
 
-#include "util.h"
+#define PWM_FREQUENCY 40
+#define PWM_RESOLUTION 16
+#define PWM_MAX_DUTY_CYCLE 65535
+
+#ifdef PRODUCTION
+#define UART Serial1
+#else
+#define UART Serial
+#endif
+
 #include <Arduino.h>
 #include <WString.h>
 #include <LiquidCrystal_I2C.h>
@@ -15,12 +24,6 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 #define BUTTON_PRESSED_EVENT_DELAY_MILLIS 300
 #define PWM_PERCENT_TO_SPEED(x) ((x) * 65535 / 100.0)
-
-#ifdef PRODUCTION
-#define UART Serial1
-#else
-#define UART Serial
-#endif
 
 #define NOT_FOUND -1
 #define PARSE_CMD_MOTOR1    0
@@ -42,10 +45,8 @@ uint8_t state = STATE_HOME;
 // Notify system 
 #define BIT_NEXT_BUTTON     (1 << 0)
 #define BIT_PREV_BUTTON     (1 << 1)
-#define BIT_STATE_HOME      (1 << 2)
-#define BIT_STATE_VIEW      (1 << 3)
-#define BIT_STATE_RUNNING   (1 << 4)
-#define BIT_STATE_TEST      (1 << 5)
+#define BIT_NEW_TEST        (1 << 2)
+#define BIT_NEW_VIEW        (1 << 3)
 #define IS_BIT_SET(x,b) ((x & (b)) != 0)
 #define BIT_SET(x,b) (x |= (b))
 #define BIT_CLEAR(x,b) (x &= ~(b))
@@ -58,13 +59,22 @@ uint8_t session_page = 0;
 uint16_t rev_pwm = 0;
 uint16_t rot_pwm = 0;
 uint32_t pressed_event_millis = 0;
+stimer_t timer4;
+stimer_t timer3;
 
 
 #include "EEPROM_helper.h"
 
+void serial_command_task(void);
+static inline void display_home(bool is_render);
+static inline void display_testpwm(bool is_render);
+static inline void display_session(bool is_first);
+static inline void display_running();
+static inline void display_task(void);
+
 void on_assert(const char* filename, uint16_t line, const char* expr) {
 
-    Timer4.setPrescaleFactor(100);
+    //Timer4.setPrescaleFactor(312);
     
     while(1) {
         
@@ -91,18 +101,18 @@ void on_push_button(void) {
     pressed_event_millis = millis();
 }
 
-void status_led_task(void) {
-    gpio_toggle_bit(PIN_MAP[LED_BUILTIN].gpio_device, PIN_MAP[LED_BUILTIN].gpio_bit);
+void status_led_task(stimer_t*) {
+    digitalToggle(LED_BUILTIN);
 }
 
 void turn_on_motor(uint16_t speed1, uint16_t speed2) {
-    pwmWrite(REV_MOTOR_PIN, speed1);
-    pwmWrite(ROT_MOTOR_PIN, speed2);
+    analogWrite(REV_MOTOR_PIN, speed1);
+    analogWrite(ROT_MOTOR_PIN, speed2);
 }
 
 void turn_off_motor() {
-    pwmWrite(REV_MOTOR_PIN, 0);
-    pwmWrite(ROT_MOTOR_PIN, 0);
+    pwm_stop(digitalPinToPinName(REV_MOTOR_PIN));
+    pwm_stop(digitalPinToPinName(ROT_MOTOR_PIN));
 }
 
 void show_session(session_t *list, int length) {
@@ -265,10 +275,4 @@ static inline void test_pwm(String *cmd) {
         }
     }
 }
-
-/*=== Main CODE ===================================*/
-__attribute__(( constructor )) void premain() {
-    init();
-}
-
 #endif

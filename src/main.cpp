@@ -1,28 +1,29 @@
 #include "main.h"
 
-void gpio_init(void) {
-    turn_off_motor();
-    pinMode(LED_BUILTIN, OUTPUT);
-    pinMode(REV_MOTOR_PIN, PWM);
-    pinMode(ROT_MOTOR_PIN, PWM);
-    pinMode(NEXT_BUTTON_PIN, INPUT_PULLUP);
-    pinMode(PREV_BUTTON_PIN, INPUT_PULLUP);
-    attachInterrupt(NEXT_BUTTON_PIN, on_push_button, FALLING);
-    attachInterrupt(PREV_BUTTON_PIN, on_push_button, FALLING);
-    
-    Timer3.setPrescaleFactor(36); // PWM 30-40Hz
-    
-    Timer4.setOverflow(57600);
-    Timer4.setPrescaleFactor(625); // LED status 2Hz
-    Timer4.attachInterrupt(0, status_led_task); // attach to led task
-    
-    UART.begin(9600);
-    
-    lcd.init();
-    lcd.backlight();
+void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(REV_MOTOR_PIN, OUTPUT);
+  pinMode(ROT_MOTOR_PIN, OUTPUT);
+  pinMode(NEXT_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(PREV_BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(NEXT_BUTTON_PIN, on_push_button, FALLING);
+  attachInterrupt(PREV_BUTTON_PIN, on_push_button, FALLING);
+  turn_off_motor();
+  
+  timer4.timer = TIM4;
+  TimerHandleInit(&timer4, 57600, 1250); // LED status 1Hz
+  attachIntHandle(&timer4, status_led_task);
 
-    ASSERT( EEPROM.init() == EEPROM_OK );
-    load_EEPROM();
+  UART.begin(9600);
+  EEPROM.begin();
+
+  lcd.init();
+  lcd.backlight();
+}
+
+void loop() {
+  serial_command_task();
+  display_task();
 }
 
 void serial_command_task(void) {
@@ -40,9 +41,12 @@ void serial_command_task(void) {
         } else if (serial_rx.startsWith("HI")) {
             UART.println("HI");
         } else if (serial_rx.startsWith("T")) {
+            UART.println("OK");
             if (!session_running) {
                 test_pwm(&serial_rx);
                 state = STATE_TEST;
+                BIT_SET(bit_notify, BIT_NEW_TEST);
+                turn_on_motor(rev_pwm, rot_pwm);
             }
         } else if (serial_rx.length() > 0) {
             success = parse_command(&serial_rx, session_list, &session_length);
@@ -51,16 +55,16 @@ void serial_command_task(void) {
                 if (!session_running) {
                     save_EEPROM();
                     state = STATE_VIEW;
+                    BIT_SET(bit_notify, BIT_NEW_VIEW);
                 }
             }
             else { UART.print("ERROR "); UART.println(success); }
         }
         serial_rx = "";
-        b = '\0';
     }
 }
 
-static inline void display_home(boolean is_render) {
+static inline void display_home(bool is_render) {
     if (is_render)
         lcd_display_home();
     if ( IS_BIT_SET(bit_notify, BIT_NEXT_BUTTON) ) {
@@ -76,16 +80,20 @@ static inline void display_home(boolean is_render) {
         }
     }
     else if ( IS_BIT_SET(bit_notify, BIT_PREV_BUTTON) ) {
-        BIT_CLEAR(bit_notify, BIT_NEXT_BUTTON);
+        BIT_CLEAR(bit_notify, BIT_PREV_BUTTON);
         lcd.setCursor(0,2);
-        lcd.print(clear_EEPROM() == EEPROM_OK ? "      Success" : "       Error");
+        lcd.print("     Clearing...");
+        clear_EEPROM();
+        lcd.setCursor(0,2);
+        lcd.print("      Success   ");
         delay(1000);
         lcd_display_home();
     }
 }
 
-static inline void display_testpwm(boolean is_render) {
-    if (is_render) {
+static inline void display_testpwm(bool is_render) {
+    bool is_new_test = IS_BIT_SET(bit_notify, BIT_NEW_TEST);
+    if (is_render || is_new_test) {
         lcd_display_test(rev_pwm, rot_pwm);
         turn_on_motor(rev_pwm, rot_pwm);
     }
@@ -93,11 +101,14 @@ static inline void display_testpwm(boolean is_render) {
         BIT_CLEAR(bit_notify, BIT_NEXT_BUTTON | BIT_PREV_BUTTON);
         state = STATE_HOME;
     }
+    if ( is_new_test ) {
+        BIT_CLEAR(bit_notify, BIT_NEW_TEST);
+    }
 }
 
-static inline void display_session(boolean is_first) {
+static inline void display_session(bool is_first) {
     static uint8_t i=0;
-    boolean is_render = false;
+    bool is_render = false;
     if (is_first) {
         i = 0;
         is_render = true;
@@ -122,7 +133,8 @@ static inline void display_session(boolean is_first) {
 
 static inline void display_running() {
     static uint16_t minute = 0;
-    static int8_t second = 0;
+    static uint8_t second = 0;
+    static uint32_t t = 0;
     session_running = true;
     for (session_page = 0;session_page < session_length; session_page++) {
         lcd_display_running(session_page);
@@ -134,36 +146,36 @@ static inline void display_running() {
         for (; minute >=0; minute--) {
             for (second = 60; second >= 0;) {
                 if (session_running) show_timer(minute, second);                
-                // WHEN PAUSE
-                if ( IS_BIT_SET(bit_notify, BIT_NEXT_BUTTON) ) {
-                    BIT_CLEAR(bit_notify, BIT_NEXT_BUTTON);
-                    if (session_running) {
-                        session_running = false;
-                        lcd.setCursor(13, 3);
-                        lcd.print("  End >");
-                        turn_off_motor();
-                    } else {
-                        turn_off_motor();
-                        state = STATE_VIEW;
-                        goto finish;
+                for(t=millis(); millis()-t<1000;) {
+                    // WHEN PAUSE
+                    if ( IS_BIT_SET(bit_notify, BIT_NEXT_BUTTON) ) {
+                        BIT_CLEAR(bit_notify, BIT_NEXT_BUTTON);
+                        if (session_running) {
+                            session_running = false;
+                            lcd.setCursor(13, 3);
+                            lcd.print("  End >");
+                            turn_off_motor();
+                        } else {
+                            goto finish;
+                        }
                     }
-                }
-                // WHEN RESUME
-                else if ( IS_BIT_SET(bit_notify, BIT_PREV_BUTTON) ) {
-                    BIT_CLEAR(bit_notify, BIT_PREV_BUTTON);
-                    if (!session_running) {
-                        session_running = true;
-                        lcd.setCursor(13, 3);
-                        lcd.print("Pause >");
-                        turn_on_motor(
-                            PWM_PERCENT_TO_SPEED(session_list[session_page].motor1_pwm),
-                            PWM_PERCENT_TO_SPEED(session_list[session_page].motor2_pwm)
-                        );
-                    } else {
-                        session_running = false;
-                        lcd.setCursor(13, 3);
-                        lcd.print("  End >");
-                        turn_off_motor();
+                    // WHEN RESUME
+                    else if ( IS_BIT_SET(bit_notify, BIT_PREV_BUTTON) ) {
+                        BIT_CLEAR(bit_notify, BIT_PREV_BUTTON);
+                        if (!session_running) {
+                            session_running = true;
+                            lcd.setCursor(13, 3);
+                            lcd.print("Pause >");
+                            turn_on_motor(
+                                PWM_PERCENT_TO_SPEED(session_list[session_page].motor1_pwm),
+                                PWM_PERCENT_TO_SPEED(session_list[session_page].motor2_pwm)
+                            );
+                        } else {
+                            session_running = false;
+                            lcd.setCursor(13, 3);
+                            lcd.print("  End >");
+                            turn_off_motor();
+                        }
                     }
                 }
                 if (session_running) second--;
@@ -172,12 +184,15 @@ static inline void display_running() {
         }
     }
 finish:
+    turn_off_motor();
     session_running = false;
+    state = STATE_VIEW;
 }
 
 static inline void display_task(void) {
     static uint8_t local_state = STATE_NONE;
-    boolean is_render = (local_state != state);
+    bool is_render = (local_state != state);
+    local_state = state;
     switch (state) {
         case STATE_HOME:
             display_home(is_render);
@@ -193,14 +208,3 @@ static inline void display_task(void) {
             break;
     }
 }
-
-/*=== START Main CODE =================================*/
-int main(void) {
-    gpio_init();
-    for(;;) {
-        serial_command_task();
-        display_task();
-    }
-    return 0;
-}
-/*=== END Main CODE ===================================*/

@@ -3,12 +3,8 @@
 
 #include <EEPROM.h>
 
-#define DATA_READ_EXP(ADDR, VAR, EXP) if (EEPROM_OK == EEPROM.read(ADDR, &tmp)) { \
-        VAR = EXP; \
-        } else { \
-        VAR = 0; \
-        }
-#define DATA_READ(ADDR, VAR) DATA_READ_EXP(ADDR, VAR, tmp);
+#define DATA_READ_EXP(ADDR, VAR, EXP) tmp = EEPROM.read(ADDR); VAR = EXP;
+#define DATA_READ(ADDR, VAR) DATA_READ_EXP(ADDR, VAR, tmp)
 
 // EEPROM SECTION NOTE
 // BASE ADDRESS 0x08001F00 FOR STM32F103C8 128K ROM
@@ -54,8 +50,9 @@ void save_EEPROM(void) {
     }
 }
 
-uint16_t clear_EEPROM(void) {
-    return EEPROM.format();
+void clear_EEPROM(void) {
+    for (uint32_t i=0x01; i<=SESSION_LENGTH_ADDR; i++) 
+        EEPROM.write(i, 0);
 }
 
 #endif
