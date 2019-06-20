@@ -1,9 +1,9 @@
 #ifndef __MAIN__H_
 #define __MAIN__H_
 
-#define PWM_FREQUENCY 40
-#define PWM_RESOLUTION 16
-#define PWM_MAX_DUTY_CYCLE 65535
+#define PWM_FREQUENCY 10
+#define PWM_RESOLUTION 8
+#define PWM_MAX_DUTY_CYCLE 255
 
 #ifdef PRODUCTION
 #define UART Serial1
@@ -13,17 +13,30 @@
 
 #include <Arduino.h>
 #include <WString.h>
-#include <LiquidCrystal_I2C.h>
 
 #define NEXT_BUTTON_PIN PA1
 #define PREV_BUTTON_PIN PA0
-#define REV_MOTOR_PIN PB0
-#define ROT_MOTOR_PIN PB1
 
-LiquidCrystal_I2C lcd(0x27, 20, 4);
+// Usage 2: based on 
+// Article: http://www.hessmer.org/blog/2013/12/28/ibt-2-h-bridge-with-arduino/
+#define REV_MOTOR_PIN PB0
+#define REV_MOTOR_R_IS PA5
+#define REV_MOTOR_L_IS PA4
+#define REV_MOTOR_R_PWM PB11
+#define REV_MOTOR_L_PWM PB10
+#define REV_MOTOR_EN REV_MOTOR_R_PWM
+
+#define ROT_MOTOR_PIN PB1
+#define ROT_MOTOR_R_IS PA3
+#define ROT_MOTOR_L_IS PA2
+#define ROT_MOTOR_R_PWM PA7
+#define ROT_MOTOR_L_PWM PA6
+#define ROT_MOTOR_EN ROT_MOTOR_R_PWM
+
+#define FAILURE_VOLTAGE 500 // Target 1.6V (Calulated from 1024 * 1.6 / 3.3)
 
 #define BUTTON_PRESSED_EVENT_DELAY_MILLIS 300
-#define PWM_PERCENT_TO_SPEED(x) ((x) * 65535 / 100.0)
+#define PWM_PERCENT_TO_SPEED(x) ((x) * PWM_MAX_DUTY_CYCLE / 100.0)
 
 #define NOT_FOUND -1
 #define PARSE_CMD_MOTOR1    0
@@ -47,6 +60,7 @@ uint8_t state = STATE_HOME;
 #define BIT_PREV_BUTTON     (1 << 1)
 #define BIT_NEW_TEST        (1 << 2)
 #define BIT_NEW_VIEW        (1 << 3)
+#define BIT_REFRESH         (1 << 4)
 #define IS_BIT_SET(x,b) ((x & (b)) != 0)
 #define BIT_SET(x,b) (x |= (b))
 #define BIT_CLEAR(x,b) (x &= ~(b))
@@ -55,12 +69,12 @@ uint8_t bit_notify = 0;
 
 String serial_rx = "";
 bool session_running = false;
+bool is_fail = false;
 uint8_t session_page = 0;
 uint16_t rev_pwm = 0;
 uint16_t rot_pwm = 0;
 uint32_t pressed_event_millis = 0;
 stimer_t timer4;
-stimer_t timer3;
 
 
 #include "EEPROM_helper.h"
@@ -69,13 +83,11 @@ void serial_command_task(void);
 static inline void display_home(bool is_render);
 static inline void display_testpwm(bool is_render);
 static inline void display_session(bool is_first);
-static inline void display_running();
+static inline void display_running(bool);
 static inline void display_task(void);
 
 void on_assert(const char* filename, uint16_t line, const char* expr) {
-
     //Timer4.setPrescaleFactor(312);
-    
     while(1) {
         
         UART.print("Assert: ");
@@ -86,9 +98,9 @@ void on_assert(const char* filename, uint16_t line, const char* expr) {
         UART.println(line);
         delay(2000);
     }
-
 }
 
+// Depreciated: Use UART COMMAND
 void on_push_button(void) {
     if (millis() - pressed_event_millis > BUTTON_PRESSED_EVENT_DELAY_MILLIS) {
         if (digitalRead(NEXT_BUTTON_PIN) == LOW) {
@@ -101,18 +113,42 @@ void on_push_button(void) {
     pressed_event_millis = millis();
 }
 
-void status_led_task(stimer_t*) {
+void status_led_task() {
     digitalToggle(LED_BUILTIN);
 }
 
+void motor_init() {
+    pinMode(REV_MOTOR_PIN, OUTPUT);
+    pinMode(REV_MOTOR_L_PWM, OUTPUT);
+    pinMode(REV_MOTOR_R_PWM, OUTPUT);
+    pinMode(REV_MOTOR_L_IS, INPUT_ANALOG);
+    pinMode(REV_MOTOR_R_IS, INPUT_ANALOG);
+
+    pinMode(ROT_MOTOR_PIN, OUTPUT);
+    pinMode(ROT_MOTOR_L_PWM, OUTPUT);
+    pinMode(ROT_MOTOR_R_PWM, OUTPUT);
+    pinMode(ROT_MOTOR_L_IS, INPUT_ANALOG);
+    pinMode(ROT_MOTOR_R_IS, INPUT_ANALOG);
+
+    // Change this if direction is not correct
+    digitalWrite(REV_MOTOR_L_PWM, LOW);
+    digitalWrite(REV_MOTOR_R_PWM, LOW);
+    digitalWrite(ROT_MOTOR_L_PWM, LOW);
+    digitalWrite(ROT_MOTOR_R_PWM, LOW);
+}
+
 void turn_on_motor(uint16_t speed1, uint16_t speed2) {
+    digitalWrite(REV_MOTOR_EN, HIGH);
+    digitalWrite(ROT_MOTOR_EN, HIGH);
     analogWrite(REV_MOTOR_PIN, speed1);
     analogWrite(ROT_MOTOR_PIN, speed2);
 }
 
 void turn_off_motor() {
-    pwm_stop(digitalPinToPinName(REV_MOTOR_PIN));
-    pwm_stop(digitalPinToPinName(ROT_MOTOR_PIN));
+    digitalWrite(REV_MOTOR_EN, LOW);
+    digitalWrite(ROT_MOTOR_EN, LOW);
+    analogWrite(REV_MOTOR_PIN, 0);
+    analogWrite(ROT_MOTOR_PIN, 0);
 }
 
 void show_session(session_t *list, int length) {
@@ -127,60 +163,45 @@ void show_session(session_t *list, int length) {
 
 void show_display_menu(int page=0) {
     if (page > 0) {
-        lcd.setCursor(0, 3);
-        lcd.print("< Prev");
+        UART.print("(0) Prev");
     }
     if (IS_LAST_INDEX(page, session_length)) {
-        lcd.setCursor(15, 3);
-        lcd.print("Run >");
+        UART.println("(1) Run");
     } else {
-        lcd.setCursor(14, 3);
-        lcd.print("Next >");
+        UART.println("(1) Next");
     }
 }
 
 void show_running_menu() {
-    lcd.setCursor(0, 3);
-    lcd.print("< Resume     Pause >");
+    if (session_running)
+        UART.println("(1) Pause");
+    else
+        UART.println("(0) Resume (1) END");
 }
 
 void show_timer(uint16_t minute, uint8_t second) {
-    lcd.setCursor(7, 2);
-    lcd.print("             ");
-    lcd.setCursor(7, 2);
-    lcd.print(minute);
-    lcd.print("m");
-    lcd.print(second);
-    lcd.print("s");
+    UART.print(minute);
+    UART.print("m");
+    UART.print(second);
+    UART.println("s");
 }
 
 void lcd_display_home() {
-    lcd.clear();
-    lcd.setCursor(3,1);
-    lcd.print("MixerOne v1.0");
-    lcd.setCursor(0,3);
-    lcd.print("< Clear       Load >");
+    UART.println("MixerOne v1.0");
+    UART.println("(0) Clear (1) Load");
 }
 
 void lcd_display_test(uint16_t a, uint16_t b) {
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("TEST PWM");
-    lcd.setCursor(0, 1);
-    lcd.print("Revolution: "); lcd.print(a);
-    lcd.setCursor(0, 2);
-    lcd.print("Rotation:   "); lcd.print(b);
+    UART.println("TEST PWM");
+    UART.print("Revolution: "); UART.println(a);
+    UART.print("Rotation:   "); UART.println(b);
 }
 
 void lcd_display_session(int page=0) {
     if (page < session_length) {
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Session "); lcd.print(page+1); lcd.print(" "); lcd.print(session_list[page].duration_minute); lcd.print("min");
-        lcd.setCursor(0, 1);
-        lcd.print("Revolution: "); lcd.print(session_list[page].motor1_pwm); lcd.print("%");
-        lcd.setCursor(0, 2);
-        lcd.print("Rotation:   "); lcd.print(session_list[page].motor2_pwm); lcd.print("%");
+        UART.print("Session "); UART.print(page+1); UART.print(" "); UART.print(session_list[page].duration_minute); UART.println("min");
+        UART.print("Revolution: "); UART.print(session_list[page].motor1_pwm); UART.println('%');
+        UART.print("Rotation:   "); UART.print(session_list[page].motor2_pwm); UART.println('%');
         show_display_menu(page);
         session_page = page;
     }
@@ -188,15 +209,10 @@ void lcd_display_session(int page=0) {
 
 void lcd_display_running(int page=0) {
     if (page < session_length) {
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Session "); lcd.print(page+1); lcd.print(" "); lcd.print(session_list[page].duration_minute); lcd.print("min");
-        lcd.setCursor(0, 1);
-        lcd.print("Rev: "); lcd.print(session_list[page].motor1_pwm); lcd.print("%");
-        lcd.setCursor(10, 1);
-        lcd.print("Rot:   "); lcd.print(session_list[page].motor2_pwm); lcd.print("%");
-        lcd.setCursor(0, 2);
-        lcd.print("Left: "); 
+        UART.print("Session "); UART.print(page+1); UART.print(" "); UART.print(session_list[page].duration_minute); UART.println("min");
+        UART.print("Rev: "); UART.print(session_list[page].motor1_pwm); UART.println('%');
+        UART.print("Rot:   "); UART.print(session_list[page].motor2_pwm); UART.println('%');
+        UART.print("Left: "); 
         show_timer(session_list[page].duration_minute, 0);
         show_running_menu();
     }
@@ -273,6 +289,35 @@ static inline void test_pwm(String *cmd) {
             if (!IS_DIGIT(b)) break;
             rot_pwm = rot_pwm*10 + (b - '0');
         }
+    }
+}
+
+void on_fail() {
+    while (is_fail) {
+        digitalWrite(REV_MOTOR_L_PWM, LOW);
+        digitalWrite(REV_MOTOR_R_PWM, LOW);
+        digitalWrite(ROT_MOTOR_L_PWM, LOW);
+        digitalWrite(ROT_MOTOR_R_PWM, LOW);
+        turn_off_motor();
+
+        UART.println("MOTOR ERROR");
+        delay(2000);
+    }
+}
+
+void watchdog(stimer_t*) {
+    
+    digitalToggle(LED_BUILTIN);
+    
+    if (is_fail)
+        return;
+    
+    if (analogRead(REV_MOTOR_L_IS) >= FAILURE_VOLTAGE ||
+        analogRead(REV_MOTOR_R_IS) >= FAILURE_VOLTAGE ||
+        analogRead(ROT_MOTOR_L_IS) >= FAILURE_VOLTAGE ||
+        analogRead(ROT_MOTOR_R_IS) >= FAILURE_VOLTAGE) {
+        is_fail = true;
+        on_fail();
     }
 }
 #endif
