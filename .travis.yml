@@ -29,7 +29,6 @@ python:
     - "2.7"
 
 sudo: false
-
 cache:
     directories:
         - "~/.platformio"
@@ -37,8 +36,9 @@ cache:
 install:
     - pip install -U platformio
     - platformio update
+
 script:
-    - platformio run
+     - platformio run
 
 
 #
