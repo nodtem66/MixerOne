@@ -31,7 +31,7 @@
 #define ROT_MOTOR_L_IS PA2
 #define ROT_MOTOR_R_PWM PA7
 #define ROT_MOTOR_L_PWM PA6
-#define ROT_MOTOR_EN ROT_MOTOR_R_PWM
+#define ROT_MOTOR_EN ROT_MOTOR_L_PWM
 
 #define FAILURE_VOLTAGE 500 // Target 1.6V (Calulated from 1024 * 1.6 / 3.3)
 
@@ -309,6 +309,7 @@ void watchdog(stimer_t*) {
     
     digitalToggle(LED_BUILTIN);
     
+    /* Depreciated
     if (is_fail)
         return;
     
@@ -319,5 +320,6 @@ void watchdog(stimer_t*) {
         is_fail = true;
         on_fail();
     }
+    */
 }
 #endif

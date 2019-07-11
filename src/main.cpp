@@ -3,10 +3,10 @@
 void setup() {
   motor_init();
   pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(NEXT_BUTTON_PIN, INPUT_PULLUP);
-  pinMode(PREV_BUTTON_PIN, INPUT_PULLUP);
-  attachInterrupt(NEXT_BUTTON_PIN, on_push_button, FALLING);
-  attachInterrupt(PREV_BUTTON_PIN, on_push_button, FALLING);
+  //pinMode(NEXT_BUTTON_PIN, INPUT_PULLUP);
+  //pinMode(PREV_BUTTON_PIN, INPUT_PULLUP);
+  //attachInterrupt(NEXT_BUTTON_PIN, on_push_button, FALLING);
+  //attachInterrupt(PREV_BUTTON_PIN, on_push_button, FALLING);
   
   turn_off_motor();
   
